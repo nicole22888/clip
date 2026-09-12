@@ -1,8 +1,10 @@
 import os
 import json
 import logging
+import time
 from google import genai
 from google.genai import types
+# Import the centralized secure settings anchor
 from backend.core.config import settings
 
 logger = logging.getLogger("uvicorn.error")
@@ -10,79 +12,65 @@ logger = logging.getLogger("uvicorn.error")
 class GeminiVisionWorker:
     def run(self, video_path: str, user_prompt: str):
         """
-        Enterprise-grade multi-modal inspector. Uses the official Google GenAI SDK 
-        and Gemini 3.8 Flash to run structural clip highlight parsing.
+        Enterprise-grade multi-modal inspector. Safely accesses keys 
+        from the absolute settings configuration object layer.
         """
-        # Fixed production token assignment
-        api_key = "AIzaSyDAbAM7FxkXXPvEub1ze7MVx5XBt6Vv9Ms"
+        # CRITICAL FIX: Pulls key cleanly from the shared absolute configurations settings layer
+        api_key = settings.GEMINI_API_KEY
 
-        if not api_key or api_key.startswith("AIzaSyYOUR"):
-            logger.error("Missing valid GEMINI_API_KEY inside hardcoded system assignment.")
+        if not api_key or api_key == "AIzaSyYOUR_ACTUAL_GEMINI_KEY_HERE":
+            logger.error("❌ CRITICAL: Missing valid GEMINI_API_KEY inside centralized configuration settings object.")
             return self._fallback(video_path, user_prompt)
 
         try:
-            # Initialize the official secure Google Client engine object
             client = genai.Client(api_key=api_key)
-            
-            logger.info(f"Uploading media file to Google cloud file management node: {video_path}")
-            # 1. Native SDK Upload abstraction layer automatically manages chunk streaming 
+            logger.info(f"Staging binary clip onto Google AI File Service: {video_path}")
             video_file_node = client.files.upload(file=video_path)
-            logger.info(f"Staged file reference metadata successfully: {video_file_node.name}")
+            
+            while video_file_node.state.name == "PROCESSING":
+                logger.info("Waiting for Google file processing encoder layout to finalize...")
+                time.sleep(2)
+                video_file_node = client.files.get(name=video_file_node.name)
 
-            # 2. Configure strict, expert viral directory prompts instructions
             system_instruction = (
-                "You are an elite, highly paid esports and viral video editor. Your task is to analyze the video and audio tracks "
-                "to isolate the top 3 high-impact clip moments. Look and listen for: human anger/screams, gaming action spikes, "
-                "intense sound effects (fireworks, explosions, gunshots), dramatic motion, or high-energy changes.\n\n"
-                "CRITICAL: For each isolated highlight moment, you must break down the key spoken dialogue or action phrase into "
-                "dynamic, short, punchy subtitle segments. Do not lump everything into one big chunk. Keep individual subtitles short "
-                "(ideally 1 to 4 words per segment) so they match the fast rhythm of modern mobile videos.\n\n"
-                "Return ONLY a raw JSON array string matching this exact structural format:\n"
-                '[\n'
-                '  {"start": 1.2, "end": 2.1, "mood": "action", "style": "impact-bold", "suggested_text": "OH MY GOD!"},\n'
-                '  {"start": 2.2, "end": 3.5, "mood": "action", "style": "impact-bold", "suggested_text": "LETS GOOOOO!"}\n'
-                ']'
+                "You are an expert viral gaming video editor. Analyze both the audio tracks and video frames of this footage.\n"
+                "1. Find the highest energy highlight moment based on gunshots, game audio fireworks, shouting, anger, or extreme action.\n"
+                "2. Cut exactly around that highlight. Return a meticulous, tight JSON array timeline where you split "
+                "the spoken words or hype audio events into ultra-short, fast-switching caption objects (1-3 words per chunk).\n\n"
+                "Return ONLY a clean JSON list matching this exact format with zero markdown syntax or wrapping:\n"
+                '[{"start": 1.2, "end": 1.8, "mood": "action", "style": "impact-bold", "suggested_text": "LETS GO!"}]'
             )
 
-            logger.info("Triggering structural content analysis loop via Gemini 3.8 Flash...")
-            # 3. Invoke flagship Gemini 3.8 Flash using type-safe parameters
+            logger.info("Invoking Gemini 2.5 Flash timeline analysis matrix...")
             response = client.models.generate_content(
-                model="gemini-3.8-flash",
-                contents=[video_file_node, f"User Ingestion Focus Rules: {user_prompt}"],
+                model="gemini-2.5-flash",
+                contents=[video_file_node, f"Directorial instructions: {user_prompt}"],
                 config=types.GenerateContentConfig(
                     system_instruction=system_instruction,
                     response_mime_type="application/json",
-                    temperature=0.2
+                    temperature=0.1
                 )
             )
 
-            raw_response_text = response.text
-            logger.info("Received raw response text payload matrix from cloud nodes.")
-
-            # Safe clean parsing configurations
-            clean_json = raw_response_text.strip().removeprefix("```json").removesuffix("```").strip()
+            raw_text = response.text
+            clean_json = raw_text.strip().removeprefix("```json").removesuffix("```").strip()
             analysis_data = json.loads(clean_json)
 
-            # 4. Clean up remote file instance metrics to maintain zero footprint storage
             client.files.delete(name=video_file_node.name)
-            logger.info("Cleaned up resource files from remote cluster.")
-
             return {"video_path": video_path, "analysis": analysis_data, "user_prompt": user_prompt}
 
-        except Exception as sdk_fault:
-            logger.error(f"Google GenAI Client Exception encountered: {str(sdk_fault)}")
+        except Exception as e:
+            logger.error(f"Gemini Processing Exception: {str(e)}")
             return self._fallback(video_path, user_prompt)
 
     def _fallback(self, video_path, user_prompt):
-        """Production safe structural mapping default tracking fallback layers."""
         return {
             "video_path": video_path,
             "analysis": [
-                {"start": 0.5, "end": 1.8, "mood": "action", "style": "impact-bold", "suggested_text": "WATCH THIS!"},
-                {"start": 1.9, "end": 3.2, "mood": "action", "style": "impact-bold", "suggested_text": "INSANE MOMENT!"},
-                {"start": 3.3, "end": 5.0, "mood": "energetic", "style": "smooth-fade", "suggested_text": "UNREAL SPEED"}
+                {"start": 0.2, "end": 1.5, "mood": "action", "style": "impact-bold", "suggested_text": "OH MY GOD!"},
+                {"start": 1.6, "end": 2.8, "mood": "action", "style": "impact-bold", "suggested_text": "UNREAL CLIP!"},
+                {"start": 2.9, "end": 4.5, "mood": "action", "style": "impact-bold", "suggested_text": "LETS GOOOOO!"}
             ],
-            "style": "impact-bold",
             "user_prompt": user_prompt
         }
 
