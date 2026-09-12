@@ -1,0 +1,45 @@
+# System / OS files
+.DS_Store
+Thumbs.db
+
+# Project Environment Configurations
+.env
+.env.local
+.env.*.local
+
+# Python Environments & Caching
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+.venv/
+venv/
+ENV/
+dist/
+build/
+
+# Local Video Pipelines (Heavy Data Repositories)
+backend/data/uploads/*
+backend/data/proxies/*
+backend/data/outputs/*
+
+# Keep the folder structures in Git, but ignore their binary contents
+!backend/data/uploads/.gitkeep
+!backend/data/proxies/.gitkeep
+!backend/data/outputs/.gitkeep
+
+# HuggingFace & AI Model Weight Storage Caches
+.cache/
+huggingface/
+models/
+
+# Node Package Ecosystem & Production Outputs
+node_modules/
+frontend/dist/
+frontend/build/
+.pnpm-store/
+.yarn/
+
+# Debug and Execution Logs
+*.log
+celerybeat-schedule
