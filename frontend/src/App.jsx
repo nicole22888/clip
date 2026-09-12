@@ -36,10 +36,13 @@ export default function App() {
 
                 if (data.state === 'SUCCESS') {
                     clearInterval(interval);
-                    triggerUiAlert("✨ AI analysis assembly finished processing successfully!");
-                    setProxyUrl(`${window.location.origin}${data.result.proxy_url}`);
-                    setOriginalVideoPath(data.result.original_video_path);
-                    setBlueprint(data.result.blueprint);
+                    triggerUiAlert(" AI analysis assembly finished processing successfully!");
+
+                    // CRITICAL FIX: Align extraction fields with nested result objects
+                    const targetResult = data.result;
+                    setProxyUrl(`${window.location.origin}${targetResult.proxy_url}`);
+                    setOriginalVideoPath(targetResult.original_video_path);
+                    setBlueprint(targetResult.blueprint || []);
                 } else if (data.state === 'FAILURE') {
                     clearInterval(interval);
                     triggerUiAlert("❌ Background assembly pipeline processing failed.");
@@ -63,7 +66,7 @@ export default function App() {
 
                 if (data.state === 'SUCCESS') {
                     clearInterval(interval);
-                    triggerUiAlert("🎉 High-fidelity render master copy completed!");
+                    triggerUiAlert(" High-fidelity render master copy completed!");
                     setDownloadUrl(`${window.location.origin}${data.download_url}`);
                 } else if (data.state === 'FAILURE') {
                     clearInterval(interval);
@@ -79,15 +82,11 @@ export default function App() {
 
     const handleUploadSubmit = async (e) => {
         e.preventDefault();
-        if (!file) {
-            triggerUiAlert("⚠️ Please choose a video asset source file first.");
-            return;
-        }
 
         setPipelineState('QUEUED');
         setProxyUrl('');
         setDownloadUrl('');
-        triggerUiAlert(" Uploading binary file chunks to server network stream...");
+        triggerUiAlert(" Initiating cloud model analysis transaction stream...");
 
         try {
             const data = await videoService.uploadVideo(file, prompt);
@@ -102,7 +101,7 @@ export default function App() {
 
     const handleTriggerExport = async () => {
         setExportState('RENDERING');
-        triggerUiAlert("🚀 Sending blueprint parameters to high-res master renderer...");
+        triggerUiAlert(" Sending blueprint parameters to high-res master renderer...");
         try {
             const data = await videoService.requestFinalExport(originalVideoPath, blueprint);
             setExportTaskId(data.task_id);
@@ -113,8 +112,8 @@ export default function App() {
     };
 
     return (
-        <div className="min-h-screen bg-white text-gray-800 font-sans antialiased flex flex-col items-center justify-center py-8 px-4 relative">
-            
+        <div className="min-h-screen bg-white text-gray-800 font-sans antialiased flex flex-col items-center py-8 px-4 relative">
+
             {/* System Floating Custom Banner Alerts */}
             {uiAlert && (
                 <div className="absolute top-4 z-50 w-[90%] max-w-[380px] bg-[#651c1c] text-white text-xs font-semibold py-3 px-4 rounded-xl shadow-lg flex items-center justify-between border border-[#8B4513]/20 animate-fade-in">
@@ -141,7 +140,6 @@ export default function App() {
                                     type="file"
                                     accept="video/*"
                                     onChange={(e) => {
-                                        // CRITICAL CORRECTION: Extract the first primitive binary file object from the file list array
                                         if (e.target.files && e.target.files.length > 0) {
                                             setFile(e.target.files[0]);
                                         }
@@ -162,7 +160,7 @@ export default function App() {
 
                             <button
                                 type="submit"
-                                disabled={!file || pipelineState === 'QUEUED' || pipelineState === 'STARTED'}
+                                disabled={pipelineState === 'QUEUED' || pipelineState === 'STARTED'}
                                 className="w-full bg-[#651c1c] hover:bg-[#802828] disabled:bg-gray-300 text-white text-xs font-bold py-3 rounded-xl transition-colors cursor-pointer select-none shadow-xs uppercase tracking-wider"
                             >
                                 {pipelineState === 'QUEUED' || pipelineState === 'STARTED' ? `Processing Pipeline (${pipelineState})...` : 'Ignite AI Assembly'}
@@ -173,7 +171,7 @@ export default function App() {
 
                 {/* 2. Interactive Editing Core Workbench */}
                 {proxyUrl && (
-                    <div className="space-y-4">
+                    <div className="space-y-4 w-full">
                         <MobileVideoPlayer proxyUrl={proxyUrl} blueprint={blueprint} />
 
                         <DynamicTextLayer blueprint={blueprint} onUpdateBlueprint={setBlueprint} />

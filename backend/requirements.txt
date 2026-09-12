@@ -1,25 +1,18 @@
-# Tell pip where to look for CPU torch binaries if missing
---extra-index-url https://pytorch.org
-
 # API Gateway
 fastapi==0.115.0
 uvicorn==0.30.6
 python-multipart==0.0.9
 
-# Pipeline Manager (The Factory) - Updated for Python 3.14 stability
+# Pipeline Manager (The Factory)
 celery>=5.4.0
-kombu>=5.4.0
 redis>=5.0.8
 
-# Video & AI Tools
+# Video processing engines (Still needed locally to slice and crop frames)
 ffmpeg-python==0.2.0
-faster-whisper==1.0.3
 opencv-python-headless==4.10.0.84
-torch
-torchvision
-transformers>=4.48.0
-accelerate>=0.34.2
-qwen-vl-utils==0.0.8
+
+# Network wrappers
+requests==2.32.3
 
 # Utils
 pydantic-settings==2.5.2
