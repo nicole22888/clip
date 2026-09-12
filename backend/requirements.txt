@@ -6,9 +6,10 @@ fastapi==0.115.0
 uvicorn==0.30.6
 python-multipart==0.0.9
 
-# Pipeline Manager (The Factory)
-celery==5.4.0
-redis==5.0.8
+# Pipeline Manager (The Factory) - Updated for Python 3.14 stability
+celery>=5.4.0
+kombu>=5.4.0
+redis>=5.0.8
 
 # Video & AI Tools
 ffmpeg-python==0.2.0
