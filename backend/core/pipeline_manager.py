@@ -1,11 +1,23 @@
+import os
 from celery import Celery
-from core.config import settings
 
-# Initialize the Factory Manager connecting to local Redis
+BASE_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+QUEUE_DIR = os.path.join(BASE_DIR, "data", "queue")
+OUT_QUEUE = os.path.join(QUEUE_DIR, "out")
+IN_QUEUE = os.path.join(QUEUE_DIR, "in")
+RESULTS_DIR = os.path.join(QUEUE_DIR, "results")
+
+# CRITICAL AUTOMATIC FIX: Securely create all worker directories on startup
+for folder in [QUEUE_DIR, OUT_QUEUE, IN_QUEUE, RESULTS_DIR]:
+    os.makedirs(folder, exist_ok=True)
+
+# Define clean production filesystem pathways
+FILESYSTEM_URL = "filesystem://"
+
 celery_app = Celery(
     "video_pipeline",
-    broker=settings.REDIS_URL,
-    backend=settings.REDIS_URL,
+    broker=FILESYSTEM_URL,
+    backend=f"file://{RESULTS_DIR}",
     include=[
         "backend.workers.inspector.vision_ai",
         "backend.workers.choreographer.layout",
@@ -19,15 +31,21 @@ celery_app = Celery(
     ]
 )
 
-# Optimize for heavy video processing tasks
+# Production Grade Filesystem Transport Settings
 celery_app.conf.update(
     task_serializer="json",
     accept_content=["json"],
     result_serializer="json",
     timezone="UTC",
     enable_utc=True,
-    worker_prefetch_multiplier=1, # One heavy video task per worker at a time
-    task_acks_late=True,          # Don't mark as complete until perfectly finished
-    task_track_started=True,      # Let FastAPI track active video generation states
-    result_expires=86400          # Clear cached task state details after 24 hours
+    worker_prefetch_multiplier=1,
+    task_acks_late=True,
+    task_track_started=True,
+    result_expires=86400,
+    
+    # Configure the exact folder locations for message processing
+    broker_transport_options={
+        "data_folder_in": IN_QUEUE,
+        "data_folder_out": OUT_QUEUE,
+    }
 )
