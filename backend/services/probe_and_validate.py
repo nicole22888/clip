@@ -12,10 +12,8 @@ class MediaProbeService:
             probe = ffmpeg.probe(video_path)
             format_ctx = probe.get('format', {})
             
-            # Robust boundary checks against missing/N/A duration properties
             duration_raw = format_ctx.get('duration')
             if duration_raw is None or duration_raw == "N/A":
-                # Fallback to structural calculations if master duration metadata is corrupted
                 video_stream = next((s for s in probe['streams'] if s['codec_type'] == 'video'), None)
                 if video_stream and 'duration' in video_stream:
                     duration = float(video_stream['duration'])
@@ -40,43 +38,63 @@ class MediaProbeService:
 
     @staticmethod
     def validate_and_normalize_blueprint(blueprint: list, source_duration: float) -> list:
-        """Sorts, strips overlaps, checks boundaries, and handles NaN configurations cleanly."""
+        """Sorts, strips overlaps, checks boundaries, and strictly enforces string-keyed dictionary primitives output."""
+        fallback_blueprint = [{"start": 0.0, "end": min(4.0, source_duration), "character_persona": "Character 1", "audio_fx": "clean_studio", "text": "Clip Highlight"}]
+        
         if not blueprint:
-            return [{"start": 0.0, "end": min(4.0, source_duration), "text": "Clip Highlight"}]
+            return fallback_blueprint
             
         cleaned = []
         for item in blueprint:
             try:
-                start = float(item.get("start", 0.0))
-                end = float(item.get("end", 0.0))
-                text = str(item.get("text", "Highlight")).strip()
+                # Type coerce whatever structure is present into clean primitives variables
+                if isinstance(item, dict):
+                    d = item
+                elif hasattr(item, "model_dump"):
+                    d = item.model_dump()
+                elif hasattr(item, "__dict__"):
+                    d = vars(item)
+                else:
+                    continue
+
+                start = float(d.get("start", 0.0))
+                end = float(d.get("end", 0.0))
+                text = str(d.get("text", d.get("suggested_text", "Highlight"))).strip()
+                persona = str(d.get("character_persona", "Character 1")).strip()
+                audio_fx = str(d.get("audio_fx", "clean_studio")).strip()
+                vocal_delivery = str(d.get("vocal_delivery", "normal")).strip()
                 
                 if not math.isfinite(start) or not math.isfinite(end): continue
                 if start < 0 or end <= start or start >= source_duration: continue
                 
-                # Constrain boundary overflow endpoints dynamically
                 end = min(end, source_duration)
-                cleaned.append({"start": start, "end": end, "text": text})
+                
+                # ENFORCE STRING KEYS DICTIONARY NATIVELY RIGHT HERE
+                cleaned.append({
+                    "start": start,
+                    "end": end,
+                    "text": text,
+                    "character_persona": persona,
+                    "audio_fx": audio_fx,
+                    "vocal_delivery": vocal_delivery
+                })
             except Exception:
                 continue
                 
         if not cleaned:
-            return [{"start": 0.0, "end": min(4.0, source_duration), "text": "Clip Highlight"}]
+            return fallback_blueprint
             
-        # Sort chronologically to safely execute chronological tracking
         cleaned.sort(key=lambda x: x["start"])
         
-        # OVERSITE REJECTION: Enforce native normalization for overlapping segments
         normalized = []
         previous = None
         for current in cleaned:
             if previous is not None:
                 if current["start"] < previous["end"]:
-                    # Adjust current clip start boundary to remove overlapping artifacts
                     current["start"] = previous["end"]
                     if current["end"] <= current["start"]:
-                        continue # Skip entirely if swallowed by the previous clip window
+                        continue
             normalized.append(current)
             previous = current
             
-        return normalized if normalized else [{"start": 0.0, "end": min(4.0, source_duration), "text": "Clip Highlight"}]
+        return normalized if normalized else fallback_blueprint

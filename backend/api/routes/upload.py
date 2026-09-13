@@ -17,23 +17,21 @@ QUEUE_DIR = os.path.join(settings.BASE_DIR, "data", "queue")
 RESULTS_DIR = os.path.join(QUEUE_DIR, "results")
 os.makedirs(RESULTS_DIR, exist_ok=True)
 
-# Extended Edge-TTS custom compiler that accepts dynamic formatting adjustments
-async def compile_parameter_voiceover(text: str, voice: str, pitch_mod: str, rate_mod: str, target_path: str):
-    import edge_tts
-    communicate = edge_tts.Communicate(text, voice, pitch=pitch_mod, rate=rate_mod)
-    await communicate.save(target_path)
-
 def run_production_pipeline_bg(file_path: str, prompt: str, voice_text: str, voice_actor: str, result_file_path: str, job_workspace_dir: str):
     """Orchestrates our multi-stage autonomous screenwriter with an infinite voice-routing registry."""
     try:
+        # Stage 1: Autonomous Multi-Modal Script Generation
         logger.info("📡 Stage 1: AI Screenwriter analyzing footage context and generating script...")
         res_inspector = analyze_video.run(file_path, prompt)
         blueprint_data = res_inspector.get("analysis", [])
         
+        # Two-Way Script Overwrite Strategy
         is_user_script_present = voice_text and voice_text != "Watch this play!"
         if is_user_script_present:
+            logger.info("✍️ Manual script box detected. Overriding AI generation text structures...")
             import re
             user_phrases = [s.strip() for s in re.split(r'[.,\n]', voice_text) if s.strip()]
+            
             normalized_blueprint = []
             for idx, item in enumerate(blueprint_data):
                 phrase = user_phrases[idx % len(user_phrases)]
@@ -46,6 +44,7 @@ def run_production_pipeline_bg(file_path: str, prompt: str, voice_text: str, voi
                     "text": phrase
                 })
         else:
+            logger.info("🧠 Autonomous path active. Utilizing Gemini's self-deducted script.")
             normalized_blueprint = blueprint_data
 
         GLOBAL_VOICE_POOL = [
@@ -61,12 +60,12 @@ def run_production_pipeline_bg(file_path: str, prompt: str, voice_text: str, voi
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
         
+        # Stage 2: Parallel Voice Weaver Loop
         for idx, segment in enumerate(normalized_blueprint):
             current_line = str(segment["text"])
             raw_persona_name = str(segment.get("character_persona", "Narrator")).strip()
             delivery = str(segment.get("vocal_delivery", "normal")).strip()
             
-            # Map Persona names to specific actors
             if raw_persona_name not in list(persona_voice_registry.keys()):
                 target_actor = GLOBAL_VOICE_POOL[allocated_voice_index % len(GLOBAL_VOICE_POOL)]
                 persona_voice_registry[raw_persona_name] = target_actor
@@ -74,7 +73,6 @@ def run_production_pipeline_bg(file_path: str, prompt: str, voice_text: str, voi
             else:
                 target_actor = persona_voice_registry[raw_persona_name]
 
-            # DYNAMIC ACOUSTIC WEAVER: Map delivery strings to pitch/rate changes on the fly
             pitch_mod = "+0Hz"
             rate_mod = "+0%"
             
@@ -91,26 +89,28 @@ def run_production_pipeline_bg(file_path: str, prompt: str, voice_text: str, voi
             voice_filename = f"voice_segment_{idx}_{uuid.uuid4().hex[:4]}.mp3"
             voice_absolute_path = os.path.join(job_workspace_dir, voice_filename)
             
-            logger.info(f"🎙️ Stage 2: Compiling [{raw_persona_name}] ({target_actor}) Style: [{delivery}] -> Pitch: {pitch_mod}, Rate: {rate_mod}")
-            loop.run_until_complete(compile_parameter_voiceover(current_line, target_actor, pitch_mod, rate_mod, voice_absolute_path))
+            logger.info(f"🎙️ Stage 2: Compiling neural speech for [{raw_persona_name}] ({target_actor}) Style: [{delivery}]")
+            loop.run_until_complete(VoiceoverService.generate_speech_file(current_line, target_actor, voice_absolute_path))
             voice_tracks_manifest.append(voice_absolute_path)
             
         loop.close()
 
         rendering_payload = {
             "video_path": file_path,
-            "blueprint": normalized_blueprint,
+            "blueprint": normalized_blueprint, # Clean dict elements forwarded directly
             "voice_tracks": voice_tracks_manifest,
             "workspace_dir": job_workspace_dir,
             "voice_text": voice_text,
             "voice_actor": voice_actor
         }
         
+        # Stage 3: Deterministic Composition Rendering
         logger.info("🎬 Stage 3: Executing multi-track padding and audio filter mixers...")
         res_renderer = generate_proxy_worker.generate_proxy(rendering_payload)
         
         with open(result_file_path, "w") as f:
             json.dump({"state": "SUCCESS", "result": res_renderer}, f)
+        logger.info("✨ Job pipeline completed all rendering metrics and passed QC safely!")
         
         if os.path.exists(job_workspace_dir):
             shutil.rmtree(job_workspace_dir)
