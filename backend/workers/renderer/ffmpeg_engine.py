@@ -52,9 +52,22 @@ class DeterministicRenderPipeline:
 
         profile = settings.RENDER_PROFILE
         
+        # Ingest and probe source metadata properties natively
         meta = MediaProbeService.probe_source(video_path)
         source_duration = meta["duration"]
         has_audio = meta["has_audio"]
+        
+        # Safe extraction of original container pixel video streams configuration tracks
+        video_track = next((s for s in meta["probe_raw"]['streams'] if s['codec_type'] == 'video'), None)
+        orig_width = int(video_track.get('width', 1920)) if video_track else 1920
+        orig_height = int(video_track.get('height', 1080)) if video_track else 1080
+        
+        # PURE PYTHON MULTI-SCALE RESOLUTION ALIGNMENT
+        # Deterministically calculate scaled width and height dimensions in pure Python
+        # variables, completely removing fragile backslash string equations!
+        scale_factor = max(1080 / orig_width, 1920 / orig_height)
+        target_scale_width = int(orig_width * scale_factor)
+        target_scale_height = int(orig_height * scale_factor)
         
         validated_blueprint = MediaProbeService.validate_and_normalize_blueprint(blueprint, source_duration)
 
@@ -94,10 +107,11 @@ class DeterministicRenderPipeline:
 
                 logger.info(f"🎬 Slicing Segment #{index+1}: {start_cut}s to {end_cut}s ({duration:.2f}s) -> Padding ({pad_dur_sec:.2f}s)")
 
-                # Native input streams mapping
+                # PERFECT DECOUPLED FILTER GRAPH PIPELINE: Maps target scale width and height 
+                # using pre-calculated integers to guarantee absolute stability across all video containers!
                 video_node = (
                     ffmpeg.input(video_path, ss=start_cut, t=duration).video
-                    .filter('scale', r'iw*max(1080/iw\,1920/ih)', r'ih*max(1080/iw\,1920/ih)')
+                    .filter('scale', target_scale_width, target_scale_height)
                     .filter('crop', 1080, 1920)
                     .filter('fps', fps=profile["fps"])
                     .filter('format', 'yuv420p')
@@ -106,15 +120,11 @@ class DeterministicRenderPipeline:
                 if pad_dur_sec > 0:
                     video_node = video_node.filter('tpad', stop_mode='clone', stop_duration=pad_dur_sec)
 
-                # Defensive Game Audio Track Validation
                 if has_audio:
                     game_audio_node = ffmpeg.input(video_path, ss=start_cut, t=duration).audio
                 else:
                     game_audio_node = ffmpeg.input('anullsrc=channel_layout=stereo:sample_rate=48000', f='lavfi', t=duration).audio
 
-                # CRITICAL FIX: Hand the normalized audio nodes cleanly down into your 
-                # specialized AudioMixService sidechain compressor package modules, completely 
-                # erasing the broken text token filter parsing crash!
                 final_mixed_audio = AudioMixService.process_and_mix_tracks(
                     game_audio_node, seg_voice_path, pad_dur_sec, track_length
                 )
