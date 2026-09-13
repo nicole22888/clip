@@ -12,8 +12,6 @@ if os.path.exists(ENV_FILE_PATH):
 class Settings(BaseSettings):
     PROJECT_NAME: str = "Clipper API"
     REDIS_URL: str = "redis://localhost:6379/0"
-    
-    # Official Enterprise Pydantic Registration Target
     GEMINI_API_KEY: str = "AIzaSyYOUR_ACTUAL_GEMINI_KEY_HERE"
     EXPORT_CRF: int = 18
     
@@ -21,6 +19,18 @@ class Settings(BaseSettings):
     UPLOAD_DIR: str = os.path.join(BACKEND_DIR, "data/uploads")
     PROXY_DIR: str = os.path.join(BACKEND_DIR, "data/proxies")
     OUTPUT_DIR: str = os.path.join(BACKEND_DIR, "data/outputs")
+    
+    # ENTERPRISE MEDIA CONTRACT: Deterministic target mapping profile
+    RENDER_PROFILE: dict = {
+        "width": 1080,
+        "height": 1920,
+        "fps": 30,
+        "vcodec": "libx264",
+        "acodec": "aac",
+        "crf": 18,
+        "sample_rate": 48000,
+        "channel_layout": "stereo"
+    }
 
     model_config = SettingsConfigDict(
         env_file=ENV_FILE_PATH,

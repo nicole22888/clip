@@ -10,75 +10,76 @@ logger = logging.getLogger("uvicorn.error")
 
 class GeminiVisionWorker:
     def run(self, video_path: str, user_prompt: str):
-        """
-        Flagship external multi-modal inspector. Leverages the official Google GenAI SDK 
-        to dynamically isolate ANY number of high-impact gaming clips with zero hardcoded limits.
-        """
         api_key = settings.GEMINI_API_KEY
-
         if not api_key or api_key == "AIzaSyYOUR_ACTUAL_GEMINI_KEY_HERE":
             logger.error("❌ CRITICAL: Missing valid GEMINI_API_KEY inside configuration settings.")
             return self._fallback(video_path, user_prompt)
 
         try:
-            # Initialize the official secure Google GenAI Client wrapper
             client = genai.Client(api_key=api_key)
-            
             logger.info(f"📡 Staging video file onto Google AI Storage Nodes: {video_path}")
             video_file_node = client.files.upload(file=video_path)
-            logger.info(f"Successfully staged remote asset container: {video_file_node.name}")
             
-            # Polling guard ensuring remote file conversion processing wraps cleanly before analysis
             while video_file_node.state.name == "PROCESSING":
                 logger.info("Waiting for Google file processing encoder layout to finalize...")
                 time.sleep(2)
                 video_file_node = client.files.get(name=video_file_node.name)
 
-            # Upgraded prompt blueprint that removes hardcoded limits completely
             system_instruction = (
-                "You are an elite, highly paid esports and viral video editor. Your task is to analyze both the audio tracks "
-                "and video frames of this footage to isolate high-impact action highlights based on the user rules.\n\n"
-                "CRITICAL INSTRUCTIONS:\n"
-                "1. DO NOT limit your analysis to 3 clips. Dynamically extract AS MANY or AS FEW highlight segments as the video length "
-                "and action peaks justify. Isolate every single valid high-energy moment.\n"
-                "2. For each highlight moment, break down the key spoken dialogue or action phrase into dynamic, short, punchy caption text.\n\n"
-                "Return ONLY a raw JSON array string matching this exact structural format with no markdown tags or wrapper text:\n"
-                '[\n'
-                '  {"start": 1.2, "end": 2.5, "mood": "action", "style": "impact-bold", "text": "OH MY GOD!"},\n'
-                '  {"start": 4.1, "end": 6.8, "mood": "hype", "style": "impact-bold", "text": "UNREAL SHOT!"}\n'
-                ']'
+                "You are an expert viral video editor. Analyze both the audio tracks and video frames of this footage.\n"
+                "Isolate every single valid high-energy moment (gunshots, audio fireworks, screams).\n"
+                "For each highlight moment, return a clear mapping object with: 'start' (seconds), 'end' (seconds), "
+                "and 'text' containing a short 1-3 word punchy phrase spoken or happening during that segment."
             )
 
-            logger.info("Invoking Gemini 2.5 Flash timeline analysis matrix...")
+            logger.info("Invoking Structured Gemini 3.5 Flash client nodes...")
+            
+            # DOCUMENTED FIX: Enforces a strict schema dictionary definition blueprint using 
+            # native types to ensure outputs parse flawlessly without ever triggering AFC warnings.
             response = client.models.generate_content(
-                model="gemini-2.5-flash",
-                contents=[video_file_node, f"User Ingestion Focus Rules: {user_prompt}"],
+                model="gemini-3.5-flash",
+                contents=[video_file_node, f"Directorial instructions: {user_prompt}"],
                 config=types.GenerateContentConfig(
                     system_instruction=system_instruction,
                     response_mime_type="application/json",
-                    temperature=0.2
+                    response_schema={
+                        "type": "object",
+                        "properties": {
+                            "analysis": {
+                                "type": "array",
+                                "items": {
+                                    "type": "object",
+                                    "properties": {
+                                        "start": {"type": "number"},
+                                        "end": {"type": "number"},
+                                        "mood": {"type": "string"},
+                                        "style": {"type": "string"},
+                                        "text": {"type": "string"}
+                                    },
+                                    "required": ["start", "end", "text"]
+                                }
+                            }
+                        },
+                        "required": ["analysis"]
+                    },
+                    temperature=0.1,
+                    automatic_function_calling=types.AutomaticFunctionCallingConfig(disable=True)
                 )
             )
 
             raw_response_text = response.text
-            logger.info("Received raw response text payload matrix from cloud nodes.")
+            parsed_data = json.loads(raw_response_text.strip())
+            analysis_data = parsed_data.get("analysis", [])
 
-            # Safe clean parsing configurations
-            clean_json = raw_response_text.strip().removeprefix("```json").removesuffix("```").strip()
-            analysis_data = json.loads(clean_json)
-
-            # Clean remote asset trace footprint immediately
             client.files.delete(name=video_file_node.name)
-            logger.info("Cleaned up resource files from remote cluster.")
-
+            logger.info("✨ Cleaned up remote cloud file nodes successfully.")
             return {"video_path": video_path, "analysis": analysis_data, "user_prompt": user_prompt}
 
         except Exception as sdk_fault:
-            logger.error(f"❌ Google GenAI Client Exception encountered: {str(sdk_fault)}")
+            logger.error(f"❌ Google GenAI SDK Client error: {str(sdk_fault)}")
             return self._fallback(video_path, user_prompt)
 
     def _fallback(self, video_path, user_prompt):
-        """Emergency safe dynamic baseline fallback matching standard gaming clips metrics if connection drops."""
         return {
             "video_path": video_path,
             "analysis": [

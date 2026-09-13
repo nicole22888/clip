@@ -2,129 +2,176 @@ import os
 import uuid
 import ffmpeg
 import asyncio
+import json
 import logging
-import edge_tts
+import math
+import shutil
 from backend.core.config import settings
+from backend.services.probe_and_validate import MediaProbeService
+from backend.services.audio_mixer import AudioMixService
 
 logger = logging.getLogger("uvicorn.error")
 
-class FfmpegProcessingEngine:
-    async def _generate_voiceover(self, text: str, voice: str, output_path: str):
-        """Generates premium neural human narration using the exact voice profile selected by the user."""
-        communicate = edge_tts.Communicate(text, voice)
-        await communicate.save(output_path)
+class DeterministicRenderPipeline:
+    def _execute_production_quality_control(self, file_path: str, expected_duration: float) -> bool:
+        """Rigorously inspects contract properties to catch bad renders before publishing asset tokens."""
+        if not os.path.exists(file_path) or os.path.getsize(file_path) < 15000:
+            return False
+        try:
+            probe = ffmpeg.probe(file_path)
+            format_ctx = probe.get('format', {})
+            actual_duration = float(format_ctx.get('duration', 0.0))
+            
+            if abs(actual_duration - expected_duration) > 0.8:
+                logger.error(f"QC REJECTION: Duration deviation exceeds contract limits. Expected: {expected_duration}s, Got: {actual_duration}s")
+                return False
+                
+            video_stream = next((s for s in probe['streams'] if s['codec_type'] == 'video'), None)
+            audio_stream = next((s for s in probe['streams'] if s['codec_type'] == 'audio'), None)
+            
+            if not video_stream or not audio_stream: return False
+            if int(video_stream['width']) != 1080 or int(video_stream['height']) != 1920: return False
+            if video_stream['pix_fmt'] != 'yuv420p': return False
+            
+            return True
+        except Exception:
+            return False
+
+    async def _async_probe_duration(self, file_path: str) -> float:
+        """Natively executes ffprobe inside an async subprocess to eliminate thread-blocking operations."""
+        cmd = [
+            'ffprobe', '-v', 'error', '-show_entries', 'format=duration',
+            '-of', 'default=noprint_wrappers=1:nokey=1', file_path
+        ]
+        process = await asyncio.create_subprocess_exec(
+            *cmd,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE
+        )
+        stdout, _ = await process.communicate()
+        try:
+            return float(stdout.decode().strip())
+        except Exception:
+            return 0.0
 
     def generate_proxy(self, tracker_data: dict):
-        """
-        CAPCUT ENTERPRISE LAYER: Generates the user's custom voice script choice, 
-        ducks background gameplay levels, and stitches multi-clip compilations back-to-back.
-        """
         video_path = tracker_data["video_path"]
         blueprint = tracker_data["blueprint"]
-        voice_text = tracker_data.get("voice_text", "Check out this gaming action compilation highlight sequence!")
-        voice_actor = tracker_data.get("voice_actor", "en-US-ChristopherNeural")
+        voice_tracks = tracker_data["voice_tracks"]
+        workspace_dir = tracker_data["workspace_dir"]
 
-        if not blueprint:
-            blueprint = [{"start": 0.0, "end": 4.0, "text": "Clip Highlight"}]
-
-        filename = os.path.basename(video_path)
-        proxy_filename = f"studio_edit_{uuid.uuid4().hex[:8]}_{filename}"
-        proxy_path = os.path.join(settings.PROXY_DIR, proxy_filename)
+        profile = settings.RENDER_PROFILE
         
-        # 1. Generate the Custom Neural Voiceover script track using the selected voice profile
-        voiceover_path = os.path.join(settings.PROXY_DIR, f"voice_{uuid.uuid4().hex[:6]}.mp3")
-        logger.info(f"🎙️ Contacting Neural Network voice profile: {voice_actor}...")
-        asyncio.run(self._generate_voiceover(voice_text, voice_actor, voiceover_path))
+        meta = MediaProbeService.probe_source(video_path)
+        source_duration = meta["duration"]
+        has_audio = meta["has_audio"]
+        
+        validated_blueprint = MediaProbeService.validate_and_normalize_blueprint(blueprint, source_duration)
 
         temp_segments = []
         accumulated_time = 0.0
         normalized_blueprint = []
 
+        # Build a temporary internal async loop runner for the nested pipeline operations
+        import asyncio
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+
         try:
-            # 2. Slice out the dynamic high-energy visual scenes
-            for index, segment in enumerate(blueprint):
-                start_cut = float(segment["start"])
-                end_cut = float(segment["end"])
+            for index, segment in enumerate(validated_blueprint):
+                start_cut = segment["start"]
+                end_cut = segment["end"]
                 duration = end_cut - start_cut
                 
-                if duration <= 0: continue
+                seg_voice_path = voice_tracks[index % len(voice_tracks)]
                 
-                temp_seg = os.path.join(settings.PROXY_DIR, f"t_seg_{index}_{uuid.uuid4().hex[:4]}.mp4")
-                temp_segments.append(temp_seg)
+                # ASYNC PROBER DEPLOYMENT: Non-blocking tracking abstraction layer
+                voice_duration = loop.run_until_complete(self._async_probe_duration(seg_voice_path))
+                if voice_duration <= 0:
+                    voice_duration = duration
                 
+                pad_dur_sec = max(0.0, voice_duration - duration)
+                track_length = duration + pad_dur_sec
+
+                temp_seg_partial = os.path.join(workspace_dir, f"partial_seg_{index}.mp4")
+                temp_seg_final = os.path.join(workspace_dir, f"final_seg_{index}.mp4")
+                temp_segments.append(temp_seg_final)
+
+                logger.info(f"🎬 Processing Segment #{index+1}: Visual Slicing ({duration:.2f}s) -> Padding ({pad_dur_sec:.2f}s)")
+
+                video_node = (
+                    ffmpeg.input(video_path, ss=start_cut, t=duration).video
+                    .filter('scale', 'iw*max(1080/iw\,1920/ih)', 'ih*max(1080/iw\,1920/ih)')
+                    .filter('crop', 1080, 1920)
+                    .filter('fps', fps=profile["fps"])
+                    .filter('format', 'yuv420p')
+                )
+                
+                if pad_dur_sec > 0:
+                    video_node = video_node.filter('tpad', stop_mode='clone', stop_duration=pad_dur_sec)
+
+                if has_audio:
+                    game_audio_node = ffmpeg.input(video_path, ss=start_cut, t=duration).audio
+                else:
+                    game_audio_node = ffmpeg.input('anullsrc=channel_layout=stereo:sample_rate=48000', f='lavfi', t=duration).audio
+
+                final_mixed_audio = AudioMixService.process_and_mix_tracks(
+                    game_audio_node, seg_voice_path, pad_dur_sec, track_length
+                )
+
                 (
                     ffmpeg
-                    .input(video_path, ss=start_cut, t=duration)
-                    .output(temp_seg, vf="crop=ih*9/16:ih:(iw-ow)/2:0,scale=480:854", vcodec="libx264", preset="ultrafast", crf=26, acodec="aac")
+                    .output(video_node, final_mixed_audio, temp_seg_partial, vcodec=profile["vcodec"], crf=profile["crf"], acodec=profile["acodec"])
                     .overwrite_output()
                     .run(capture_stdout=True, capture_stderr=True)
                 )
                 
+                os.rename(temp_seg_partial, temp_seg_final)
+
                 normalized_blueprint.append({
-                    "text": segment.get("text", "Highlight!"),
+                    "text": segment["text"],
                     "start": accumulated_time,
-                    "end": accumulated_time + duration,
+                    "end": accumulated_time + track_length,
                     "x": 540,
-                    "y": 1350,
+                    "y": 1400,
                     "style": "impact-bold"
                 })
-                accumulated_time += duration
+                accumulated_time += track_length
 
-            # 3. Join the visual files back-to-back
-            manifest_path = os.path.join(settings.PROXY_DIR, f"man_{uuid.uuid4().hex[:6]}.txt")
+            manifest_path = os.path.join(workspace_dir, "manifest.txt")
             with open(manifest_path, "w") as f:
                 for tf in temp_segments:
                     f.write(f"file '{os.path.abspath(tf)}'\n")
 
-            video_only_output = os.path.join(settings.PROXY_DIR, f"v_only_{uuid.uuid4().hex[:6]}.mp4")
+            partial_proxy_path = os.path.join(workspace_dir, "output.partial.mp4")
             (
                 ffmpeg
                 .input(manifest_path, format="concat", safe=0)
-                .output(video_only_output, vcodec="libx264", acodec="aac")
+                .output(partial_proxy_path, vcodec="copy", acodec="copy")
                 .overwrite_output()
                 .run(capture_stdout=True, capture_stderr=True)
             )
 
-            logger.info("🎛️ Audio Mixing: Blending game tracks with customized neural voice...")
-            # 4. ENTERPRISE AUDIO MIXING BLOCK (Ducks game audio, layers customized character voice)
-            video_input = ffmpeg.input(video_only_output)
-            audio_voice = ffmpeg.input(voiceover_path)
+            if not self._execute_production_quality_control(partial_proxy_path, accumulated_time):
+                raise Exception("Production Quality Control Inspection Rejected the generated container properties.")
 
-            mixed_audio = ffmpeg.filter(
-                [video_input.audio, audio_voice.audio], 
-                'amix', 
-                inputs=2, 
-                duration='first', 
-                weights='1 2.8' # Boosts custom voice track clarity while dampening explosion decibels
-            )
-
-            (
-                ffmpeg
-                .output(video_input.video, mixed_audio, proxy_path, vcodec="copy", acodec="aac")
-                .overwrite_output()
-                .run(capture_stdout=True, capture_stderr=True)
-            )
-
-            # Clean structural directory cache spaces completely
-            os.remove(manifest_path)
-            os.remove(video_only_output)
-            os.remove(voiceover_path)
-            for tf in temp_segments:
-                if os.path.exists(tf): os.remove(tf)
-
-            logger.info(f"✨ Production Compilation Fully Assembled: {proxy_path}")
+            final_proxy_filename = f"studio_compiled_{uuid.uuid4().hex[:6]}.mp4"
+            final_proxy_destination = os.path.join(settings.PROXY_DIR, final_proxy_filename)
+            
+            os.rename(partial_proxy_path, final_proxy_destination)
+            logger.info(f"✨ Production Clip Compilation Successfully Published: {final_proxy_destination}")
+            
+            loop.close()
             return {
                 "status": "success",
-                "proxy_url": f"/api/streams/{proxy_filename}",
+                "proxy_url": f"/api/streams/{final_proxy_filename}",
                 "original_video_path": video_path,
                 "blueprint": normalized_blueprint
             }
 
         except ffmpeg.Error as e:
-            logger.error(f"Mixing engine failed: {e.stderr.decode()}")
-            return {"status": "error", "message": "Pipeline mixing failure"}
+            loop.close()
+            logger.error(f"FFmpeg Graph Processing Engine fault: {e.stderr.decode()}")
+            raise Exception(f"FFmpeg Internal Loop Failure: {e.stderr.decode()}")
 
-    def render_final_export(self, composition_data: dict):
-        return {"status": "completed", "export_filename": "final_studio_master.mp4", "export_path": ""}
-
-generate_proxy_worker = FfmpegProcessingEngine()
+generate_proxy_worker = DeterministicRenderPipeline()
