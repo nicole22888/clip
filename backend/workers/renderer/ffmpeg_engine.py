@@ -72,7 +72,6 @@ class DeterministicRenderPipeline:
         accumulated_time = 0.0
         normalized_blueprint = []
 
-        # Build a temporary internal async loop runner for the nested pipeline operations
         import asyncio
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
@@ -85,7 +84,6 @@ class DeterministicRenderPipeline:
                 
                 seg_voice_path = voice_tracks[index % len(voice_tracks)]
                 
-                # ASYNC PROBER DEPLOYMENT: Non-blocking tracking abstraction layer
                 voice_duration = loop.run_until_complete(self._async_probe_duration(seg_voice_path))
                 if voice_duration <= 0:
                     voice_duration = duration
@@ -99,9 +97,10 @@ class DeterministicRenderPipeline:
 
                 logger.info(f"🎬 Processing Segment #{index+1}: Visual Slicing ({duration:.2f}s) -> Padding ({pad_dur_sec:.2f}s)")
 
+                # FIXED: Converted to a raw string literal r'...' to natively resolve the syntax warnings!
                 video_node = (
                     ffmpeg.input(video_path, ss=start_cut, t=duration).video
-                    .filter('scale', 'iw*max(1080/iw\,1920/ih)', 'ih*max(1080/iw\,1920/ih)')
+                    .filter('scale', r'iw*max(1080/iw\,1920/ih)', r'ih*max(1080/iw\,1920/ih)')
                     .filter('crop', 1080, 1920)
                     .filter('fps', fps=profile["fps"])
                     .filter('format', 'yuv420p')
@@ -159,7 +158,7 @@ class DeterministicRenderPipeline:
             final_proxy_destination = os.path.join(settings.PROXY_DIR, final_proxy_filename)
             
             os.rename(partial_proxy_path, final_proxy_destination)
-            logger.info(f"✨ Production Clip Compilation Successfully Published: {final_proxy_destination}")
+            logger.info(f"🚀 Render Pipeline completed successfully. Master file published at: {final_proxy_destination}")
             
             loop.close()
             return {
@@ -170,7 +169,8 @@ class DeterministicRenderPipeline:
             }
 
         except ffmpeg.Error as e:
-            loop.close()
+            if loop.is_running():
+                loop.close()
             logger.error(f"FFmpeg Graph Processing Engine fault: {e.stderr.decode()}")
             raise Exception(f"FFmpeg Internal Loop Failure: {e.stderr.decode()}")
 

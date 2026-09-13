@@ -20,6 +20,14 @@ os.makedirs(RESULTS_DIR, exist_ok=True)
 def run_production_pipeline_bg(file_path: str, prompt: str, voice_text: str, voice_actor: str, result_file_path: str, job_workspace_dir: str):
     """Orchestrates our modular multi-stage enterprise pipeline inside an isolated workspace context."""
     try:
+        # DEFENSIVE PAYLOAD CLEANUP: If an old, stale browser cache string slips through, extract the clean prompt text safely
+        if " || VOICETEXT: " in prompt:
+            logger.info("⚠️ Legacy cache string pattern caught. Normalizing parameters dynamically...")
+            prompt_parts = prompt.split(" || VOICETEXT: ", 1)
+            prompt = prompt_parts[0]
+            if len(prompt_parts) > 1 and not voice_text or voice_text == "Watch this play!":
+                voice_text = prompt_parts[1]
+
         # Stage 1: Dynamic Cloud AI Ingestion Analysis
         logger.info("📡 Stage 1: Querying frame context parameters via Gemini Cloud nodes...")
         res_inspector = analyze_video.run(file_path, prompt)
@@ -48,7 +56,6 @@ def run_production_pipeline_bg(file_path: str, prompt: str, voice_text: str, voi
             
         loop.close()
 
-        # FIXED PAYLOAD STRUCTURE: Map inputs transparently down to the worker
         rendering_payload = {
             "video_path": file_path,
             "blueprint": blueprint_data,
@@ -66,7 +73,6 @@ def run_production_pipeline_bg(file_path: str, prompt: str, voice_text: str, voi
             json.dump({"state": "SUCCESS", "result": res_renderer}, f)
         logger.info("✨ Job pipeline completed all rendering metrics and passed QC safely!")
         
-        # Clean up temporary folders only on full pipeline success
         if os.path.exists(job_workspace_dir):
             shutil.rmtree(job_workspace_dir)
 
@@ -83,7 +89,6 @@ async def process_video(
     voice_text: str = Form("Watch this play!"),
     voice_actor: str = Form("en-US-ChristopherNeural")
 ):
-    # JOB ISOLATION SYSTEM: Build a pristine self-contained sandbox directory for this execution instance
     job_id = str(uuid.uuid4())
     job_workspace_dir = os.path.join(settings.PROXY_DIR, job_id)
     os.makedirs(job_workspace_dir, exist_ok=True)
@@ -110,7 +115,6 @@ async def process_video(
     with open(result_file_path, "w") as f:
         json.dump({"state": "STARTED"}, f)
 
-    # Directly forward parameters cleanly without legacy string parsing locks
     background_tasks.add_task(
         run_production_pipeline_bg, 
         file_path, prompt, voice_text, voice_actor, result_file_path, job_workspace_dir
