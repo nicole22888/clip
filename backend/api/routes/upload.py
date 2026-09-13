@@ -27,12 +27,12 @@ def run_production_pipeline_bg(file_path: str, prompt: str, voice_text: str, voi
         
         # Split text lines safely matching segment rows lengths
         text_sentences = [s.strip() for s in voice_text.split(".") if s.strip()]
-        if not text_sentences: text_sentences = ["Watch this action highlight sequence."]
+        if not text_sentences: 
+            text_sentences = ["Watch this action highlight sequence."]
 
         voice_tracks_manifest = []
         
         # Stage 2: Event-Loop Isolated Voice Compilation Stage
-        # Runs via native safe background loop pools without ever blocking core web receptionist lines
         import asyncio
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
@@ -48,11 +48,14 @@ def run_production_pipeline_bg(file_path: str, prompt: str, voice_text: str, voi
             
         loop.close()
 
+        # FIXED PAYLOAD STRUCTURE: Map inputs transparently down to the worker
         rendering_payload = {
             "video_path": file_path,
             "blueprint": blueprint_data,
             "voice_tracks": voice_tracks_manifest,
-            "workspace_dir": job_workspace_dir
+            "workspace_dir": job_workspace_dir,
+            "voice_text": voice_text,
+            "voice_actor": voice_actor
         }
         
         # Stage 3: Deterministic Composition Rendering
@@ -63,7 +66,7 @@ def run_production_pipeline_bg(file_path: str, prompt: str, voice_text: str, voi
             json.dump({"state": "SUCCESS", "result": res_renderer}, f)
         logger.info("✨ Job pipeline completed all rendering metrics and passed QC safely!")
         
-        # GARBAGE COLLECTION POLICY: Delete intermediate artifacts ONLY on complete success runs
+        # Clean up temporary folders only on full pipeline success
         if os.path.exists(job_workspace_dir):
             shutil.rmtree(job_workspace_dir)
 
@@ -71,9 +74,6 @@ def run_production_pipeline_bg(file_path: str, prompt: str, voice_text: str, voi
         logger.error(f"❌ Production system pipeline failure encountered: {str(pipeline_error)}")
         with open(result_file_path, "w") as f:
             json.dump({"state": "FAILURE", "error": str(pipeline_error)}, f)
-        
-        # RETENTION POLICY: We explicitly PRESERVE the isolated temporary workspace assets folder 
-        # on crash loops so you have complete visibility to inspect files and debug codes!
 
 @router.post("/process")
 async def process_video(
@@ -110,6 +110,7 @@ async def process_video(
     with open(result_file_path, "w") as f:
         json.dump({"state": "STARTED"}, f)
 
+    # Directly forward parameters cleanly without legacy string parsing locks
     background_tasks.add_task(
         run_production_pipeline_bg, 
         file_path, prompt, voice_text, voice_actor, result_file_path, job_workspace_dir
