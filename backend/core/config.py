@@ -13,7 +13,8 @@ class Settings(BaseSettings):
     PROJECT_NAME: str = "Clipper API"
     REDIS_URL: str = "redis://localhost:6379/0"
     
-    HF_API_TOKEN: str = "hf_YOUR_ACTUAL_HUGGINGFACE_TOKEN_HERE"
+    # Official Enterprise Pydantic Registration Target
+    GEMINI_API_KEY: str = "AIzaSyYOUR_ACTUAL_GEMINI_KEY_HERE"
     EXPORT_CRF: int = 18
     
     BASE_DIR: str = BACKEND_DIR
