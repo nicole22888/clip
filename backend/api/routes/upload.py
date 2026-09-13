@@ -3,7 +3,6 @@ import uuid
 import json
 import logging
 import shutil
-import re
 from fastapi import APIRouter, UploadFile, File, Form, HTTPException, BackgroundTasks
 
 from backend.core.config import settings
@@ -18,46 +17,82 @@ QUEUE_DIR = os.path.join(settings.BASE_DIR, "data", "queue")
 RESULTS_DIR = os.path.join(QUEUE_DIR, "results")
 os.makedirs(RESULTS_DIR, exist_ok=True)
 
+# Extended Edge-TTS custom compiler that accepts dynamic formatting adjustments
+async def compile_parameter_voiceover(text: str, voice: str, pitch_mod: str, rate_mod: str, target_path: str):
+    import edge_tts
+    communicate = edge_tts.Communicate(text, voice, pitch=pitch_mod, rate=rate_mod)
+    await communicate.save(target_path)
+
 def run_production_pipeline_bg(file_path: str, prompt: str, voice_text: str, voice_actor: str, result_file_path: str, job_workspace_dir: str):
-    """Orchestrates our modular multi-stage enterprise pipeline inside an isolated workspace context."""
+    """Orchestrates our multi-stage autonomous screenwriter with an infinite voice-routing registry."""
     try:
-        # Stage 1: Dynamic Cloud AI Ingestion Analysis
-        logger.info("📡 Stage 1: Querying frame context parameters via Gemini Cloud nodes...")
+        logger.info("📡 Stage 1: AI Screenwriter analyzing footage context and generating script...")
         res_inspector = analyze_video.run(file_path, prompt)
         blueprint_data = res_inspector.get("analysis", [])
         
-        normalized_blueprint = []
-        for item in blueprint_data:
-            if isinstance(item, dict):
-                txt = item.get("text", item.get("suggested_text", "Highlight!"))
+        is_user_script_present = voice_text and voice_text != "Watch this play!"
+        if is_user_script_present:
+            import re
+            user_phrases = [s.strip() for s in re.split(r'[.,\n]', voice_text) if s.strip()]
+            normalized_blueprint = []
+            for idx, item in enumerate(blueprint_data):
+                phrase = user_phrases[idx % len(user_phrases)]
                 normalized_blueprint.append({
                     "start": float(item["start"]),
                     "end": float(item["end"]),
-                    "text": str(txt)
+                    "character_persona": item.get("character_persona", "Narrator"),
+                    "vocal_delivery": item.get("vocal_delivery", "normal"),
+                    "audio_fx": item.get("audio_fx", "clean_studio"),
+                    "text": phrase
                 })
-            else:
-                continue
+        else:
+            normalized_blueprint = blueprint_data
 
-        # CAPCUT PACING FIX: Use regex to split text on commas, periods, and newlines!
-        # This breaks your massive transcript down into distinct, short, punchy, timed phrases.
-        text_sentences = [s.strip() for s in re.split(r'[.,\n]', voice_text) if s.strip()]
-        if not text_sentences: 
-            text_sentences = ["Watch this action highlight sequence."]
+        GLOBAL_VOICE_POOL = [
+            voice_actor, "en-US-EmmaNeural", "en-US-AndrewNeural", 
+            "en-GB-RyanNeural", "en-US-AvaNeural", "en-US-BrianNeural"
+        ]
 
+        persona_voice_registry = {}
+        allocated_voice_index = 0
         voice_tracks_manifest = []
+        
         import asyncio
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
         
         for idx, segment in enumerate(normalized_blueprint):
-            # Pull the exact corresponding short phrase element matching this clip block
-            sentence = text_sentences[idx % len(text_sentences)] + "."
+            current_line = str(segment["text"])
+            raw_persona_name = str(segment.get("character_persona", "Narrator")).strip()
+            delivery = str(segment.get("vocal_delivery", "normal")).strip()
+            
+            # Map Persona names to specific actors
+            if raw_persona_name not in list(persona_voice_registry.keys()):
+                target_actor = GLOBAL_VOICE_POOL[allocated_voice_index % len(GLOBAL_VOICE_POOL)]
+                persona_voice_registry[raw_persona_name] = target_actor
+                allocated_voice_index += 1
+            else:
+                target_actor = persona_voice_registry[raw_persona_name]
+
+            # DYNAMIC ACOUSTIC WEAVER: Map delivery strings to pitch/rate changes on the fly
+            pitch_mod = "+0Hz"
+            rate_mod = "+0%"
+            
+            if "deep" in delivery or "authoritative" in delivery:
+                pitch_mod = "-15Hz"
+                rate_mod = "-5%"
+            elif "whisper" in delivery or "soft" in delivery:
+                pitch_mod = "+12Hz"
+                rate_mod = "-10%"
+            elif "shouting" in delivery or "intense" in delivery or "rage" in delivery:
+                pitch_mod = "-2Hz"
+                rate_mod = "+22%"
+
             voice_filename = f"voice_segment_{idx}_{uuid.uuid4().hex[:4]}.mp3"
             voice_absolute_path = os.path.join(job_workspace_dir, voice_filename)
             
-            # Generating independent audio bursts inserts native, realistic breathing space between cuts
-            logger.info(f"🎙️ Stage 2: Compiling neural speech file track element #{idx+1} -> {voice_filename}")
-            loop.run_until_complete(VoiceoverService.generate_speech_file(sentence, voice_actor, voice_absolute_path))
+            logger.info(f"🎙️ Stage 2: Compiling [{raw_persona_name}] ({target_actor}) Style: [{delivery}] -> Pitch: {pitch_mod}, Rate: {rate_mod}")
+            loop.run_until_complete(compile_parameter_voiceover(current_line, target_actor, pitch_mod, rate_mod, voice_absolute_path))
             voice_tracks_manifest.append(voice_absolute_path)
             
         loop.close()
@@ -71,12 +106,11 @@ def run_production_pipeline_bg(file_path: str, prompt: str, voice_text: str, voi
             "voice_actor": voice_actor
         }
         
-        logger.info("🎬 Stage 3: Executing high-fidelity sidechain filters composition cuts...")
+        logger.info("🎬 Stage 3: Executing multi-track padding and audio filter mixers...")
         res_renderer = generate_proxy_worker.generate_proxy(rendering_payload)
         
         with open(result_file_path, "w") as f:
             json.dump({"state": "SUCCESS", "result": res_renderer}, f)
-        logger.info("✨ Job pipeline completed all rendering metrics and passed QC safely!")
         
         if os.path.exists(job_workspace_dir):
             shutil.rmtree(job_workspace_dir)
@@ -103,7 +137,6 @@ async def process_video(
     
     if video and video.filename:
         try:
-            logger.info(f"💾 Writing incoming video binary packets to: {file_path}")
             with open(file_path, "wb") as buffer:
                 while content := await video.read(1024 * 1024):
                     buffer.write(content)

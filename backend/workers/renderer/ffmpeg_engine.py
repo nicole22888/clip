@@ -14,63 +14,45 @@ logger = logging.getLogger("uvicorn.error")
 
 class DeterministicRenderPipeline:
     def _execute_production_quality_control(self, file_path: str, expected_duration: float) -> bool:
-        """Rigorously inspects contract properties to catch bad renders before publishing asset tokens."""
         if not os.path.exists(file_path) or os.path.getsize(file_path) < 15000:
             return False
         try:
             probe = ffmpeg.probe(file_path)
             format_ctx = probe.get('format', {})
             actual_duration = float(format_ctx.get('duration', 0.0))
-            if actual_duration <= 0:
-                return False
+            if actual_duration <= 0: return False
             return True
-        except Exception:
-            return False
+        except Exception: return False
 
     async def _async_probe_duration(self, file_path: str) -> float:
-        """Natively executes ffprobe inside an async subprocess to eliminate thread-blocking operations."""
         cmd = [
             'ffprobe', '-v', 'error', '-show_entries', 'format=duration',
             '-of', 'default=noprint_wrappers=1:nokey=1', file_path
         ]
-        process = await asyncio.create_subprocess_exec(
-            *cmd,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE
-        )
+        process = await asyncio.create_subprocess_exec(*cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
         stdout, _ = await process.communicate()
-        try:
-            return float(stdout.decode().strip())
-        except Exception:
-            return 0.0
+        try: return float(stdout.decode().strip())
+        except Exception: return 0.0
 
     def generate_proxy(self, tracker_data: dict):
         video_path = tracker_data["video_path"]
         blueprint = tracker_data["blueprint"]
         voice_tracks = tracker_data["voice_tracks"]
         workspace_dir = tracker_data["workspace_dir"]
-
         profile = settings.RENDER_PROFILE
         
-        # Ingest and probe source metadata properties natively
         meta = MediaProbeService.probe_source(video_path)
         source_duration = meta["duration"]
         has_audio = meta["has_audio"]
         
-        # Safe extraction of original container pixel video streams configuration tracks
         video_track = next((s for s in meta["probe_raw"]['streams'] if s['codec_type'] == 'video'), None)
         orig_width = int(video_track.get('width', 1920)) if video_track else 1920
         orig_height = int(video_track.get('height', 1080)) if video_track else 1080
         
-        # PURE PYTHON MULTI-SCALE RESOLUTION ALIGNMENT
-        # Deterministically calculate scaled width and height dimensions in pure Python
-        # variables, completely removing fragile backslash string equations!
         scale_factor = max(1080 / orig_width, 1920 / orig_height)
         target_scale_width = int(orig_width * scale_factor)
         target_scale_height = int(orig_height * scale_factor)
         
-        validated_blueprint = MediaProbeService.validate_and_normalize_blueprint(blueprint, source_duration)
-
         temp_segments = []
         accumulated_time = 0.0
         normalized_blueprint = []
@@ -80,23 +62,20 @@ class DeterministicRenderPipeline:
         asyncio.set_event_loop(loop)
 
         try:
-            for index, segment in enumerate(validated_blueprint):
+            for index, segment in enumerate(blueprint):
                 start_cut = float(segment["start"])
                 end_cut = float(segment["end"])
                 text_content = str(segment["text"])
+                fx_tag = str(segment.get("audio_fx", "clean_studio")) # Capture target FX string
 
-                if start_cut >= source_duration:
-                    logger.info(f"⚠️ Segment #{index+1} start ({start_cut}s) exceeds video duration ({source_duration}s). Skipping segment safely.")
-                    continue
-                
+                if start_cut >= source_duration: continue
                 end_cut = min(end_cut, source_duration)
                 duration = end_cut - start_cut
                 if duration <= 0: continue
                 
                 seg_voice_path = voice_tracks[index % len(voice_tracks)]
                 voice_duration = loop.run_until_complete(self._async_probe_duration(seg_voice_path))
-                if voice_duration <= 0:
-                    voice_duration = duration
+                if voice_duration <= 0: voice_duration = duration
                 
                 pad_dur_sec = max(0.0, voice_duration - duration)
                 track_length = duration + pad_dur_sec
@@ -105,10 +84,8 @@ class DeterministicRenderPipeline:
                 temp_seg_final = os.path.join(workspace_dir, f"final_seg_{index}.mp4")
                 temp_segments.append(temp_seg_final)
 
-                logger.info(f"🎬 Slicing Segment #{index+1}: {start_cut}s to {end_cut}s ({duration:.2f}s) -> Padding ({pad_dur_sec:.2f}s)")
+                logger.info(f"🎬 Slicing Segment #{index+1}: {start_cut}s to {end_cut}s ({duration:.2f}s) -> FX: [{fx_tag}]")
 
-                # PERFECT DECOUPLED FILTER GRAPH PIPELINE: Maps target scale width and height 
-                # using pre-calculated integers to guarantee absolute stability across all video containers!
                 video_node = (
                     ffmpeg.input(video_path, ss=start_cut, t=duration).video
                     .filter('scale', target_scale_width, target_scale_height)
@@ -116,7 +93,6 @@ class DeterministicRenderPipeline:
                     .filter('fps', fps=profile["fps"])
                     .filter('format', 'yuv420p')
                 )
-                
                 if pad_dur_sec > 0:
                     video_node = video_node.filter('tpad', stop_mode='clone', stop_duration=pad_dur_sec)
 
@@ -125,8 +101,9 @@ class DeterministicRenderPipeline:
                 else:
                     game_audio_node = ffmpeg.input('anullsrc=channel_layout=stereo:sample_rate=48000', f='lavfi', t=duration).audio
 
+                # Pass FX tag downstream cleanly
                 final_mixed_audio = AudioMixService.process_and_mix_tracks(
-                    game_audio_node, seg_voice_path, pad_dur_sec, track_length
+                    game_audio_node, seg_voice_path, pad_dur_sec, track_length, audio_fx_tag=fx_tag
                 )
 
                 (
@@ -135,7 +112,6 @@ class DeterministicRenderPipeline:
                     .overwrite_output()
                     .run(capture_stdout=True, capture_stderr=True)
                 )
-                
                 os.rename(temp_seg_partial, temp_seg_final)
 
                 normalized_blueprint.append({
@@ -148,13 +124,11 @@ class DeterministicRenderPipeline:
                 })
                 accumulated_time += track_length
 
-            if not temp_segments:
-                raise Exception("No valid segments could be compiled.")
+            if not temp_segments: raise Exception("No valid segments compiled.")
 
             manifest_path = os.path.join(workspace_dir, "manifest.txt")
             with open(manifest_path, "w") as f:
-                for tf in temp_segments:
-                    f.write(f"file '{os.path.abspath(tf)}'\n")
+                for tf in temp_segments: f.write(f"file '{os.path.abspath(tf)}'\n")
 
             partial_proxy_path = os.path.join(workspace_dir, "output.partial.mp4")
             (
@@ -166,13 +140,11 @@ class DeterministicRenderPipeline:
             )
 
             if not self._execute_production_quality_control(partial_proxy_path, accumulated_time):
-                raise Exception("Production Quality Control Inspection Rejected the generated container properties.")
+                raise Exception("QC failure.")
 
             final_proxy_filename = f"studio_compiled_{uuid.uuid4().hex[:6]}.mp4"
             final_proxy_destination = os.path.join(settings.PROXY_DIR, final_proxy_filename)
-            
             os.rename(partial_proxy_path, final_proxy_destination)
-            logger.info(f"🚀 Render Pipeline completed successfully. Master file published at: {final_proxy_destination}")
             
             loop.close()
             return {
@@ -181,11 +153,8 @@ class DeterministicRenderPipeline:
                 "original_video_path": video_path,
                 "blueprint": normalized_blueprint
             }
-
-        except ffmpeg.Error as e:
-            if loop.is_running():
-                loop.close()
-            logger.error(f"FFmpeg Graph Processing Engine fault: {e.stderr.decode()}")
-            raise Exception(f"FFmpeg Internal Loop Failure: {e.stderr.decode()}")
+        except Exception as e:
+            if loop.is_running(): loop.close()
+            raise e
 
 generate_proxy_worker = DeterministicRenderPipeline()
