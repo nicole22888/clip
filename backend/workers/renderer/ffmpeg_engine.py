@@ -57,6 +57,8 @@ class DeterministicRenderPipeline:
 
         try:
             for index, segment in enumerate(blueprint):
+                logger.info(f"DEBUG STAGE 1 (Data Shape): index={index}, type(segment)={type(segment)}, segment_payload={segment}")
+                
                 # FIXED DICTIONARY LOOKUP: Guaranteed parsing of dictionary format properties
                 start_cut = float(segment["start"])
                 end_cut = float(segment["end"])
@@ -94,6 +96,8 @@ class DeterministicRenderPipeline:
                     game_audio_node = ffmpeg.input('anullsrc=channel_layout=stereo:sample_rate=48000', f='lavfi', t=duration).audio
 
                 final_mixed_audio = AudioMixService.process_and_mix_tracks(game_audio_node, seg_voice_path, pad_dur_sec, track_length)
+
+                logger.info(f"DEBUG STAGE 2 (FFmpeg Nodes): type(video_node)={type(video_node)}, type(final_mixed_audio)={type(final_mixed_audio)}")
 
                 (
                     ffmpeg
@@ -142,6 +146,7 @@ class DeterministicRenderPipeline:
             }
         except Exception as e:
             if loop.is_running(): loop.close()
+            logger.error(f"DEBUG STAGE 3 (Crash Trace): {e}")
             raise e
 
 generate_proxy_worker = DeterministicRenderPipeline()

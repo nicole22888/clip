@@ -19,7 +19,7 @@ class AudioMixService:
         
         # CORRECTED VERIFIED SYNTAX: Call the native 'asplit' filter with explicit output lanes count.
         # This duplicates the voice node track into two completely separate wires in memory safely!
-        voice_split_node = normalized_voice.filter('asplit', 2)
+        voice_split_node = normalized_voice.filter_multi_output('asplit', 2)
         voice_lane_A = voice_split_node[0]
         voice_lane_B = voice_split_node[1]
 
