@@ -80,9 +80,10 @@ class DeterministicRenderPipeline:
 
                 logger.info(f"🎬 Slicing Segment #{index+1}: {start_cut}s to {end_cut}s ({duration:.2f}s) -> Padding ({pad_dur_sec:.2f}s)")
 
+                # FIXED: Removed explicit backslash escaping in scale filter expressions
                 video_node = (
                     ffmpeg.input(video_path, ss=start_cut, t=duration).video
-                    .filter('scale', r'iw*max(1080/iw\,1920/ih)', r'ih*max(1080/iw\,1920/ih)')
+                    .filter('scale', 'iw*max(1080/iw,1920/ih)', 'ih*max(1080/iw,1920/ih)')
                     .filter('crop', 1080, 1920)
                     .filter('fps', fps=profile["fps"])
                     .filter('format', 'yuv420p')
@@ -144,9 +145,18 @@ class DeterministicRenderPipeline:
                 "original_video_path": video_path,
                 "blueprint": normalized_blueprint
             }
+            
+        except ffmpeg.Error as e:
+            if loop.is_running(): 
+                loop.close()
+            error_log = e.stderr.decode('utf-8') if e.stderr else "No stderr captured."
+            logger.error(f"DEBUG STAGE 3 (Crash Trace - FFmpeg Stderr):\n{error_log}")
+            raise Exception(f"FFmpeg pipeline failure: {error_log}")
+            
         except Exception as e:
-            if loop.is_running(): loop.close()
-            logger.error(f"DEBUG STAGE 3 (Crash Trace): {e}")
+            if loop.is_running(): 
+                loop.close()
+            logger.error(f"DEBUG STAGE 3 (Crash Trace - General): {e}")
             raise e
 
 generate_proxy_worker = DeterministicRenderPipeline()

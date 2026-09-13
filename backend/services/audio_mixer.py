@@ -24,9 +24,10 @@ class AudioMixService:
         voice_lane_B = voice_split_node[1]
 
         # 2. AUDIO RESOLUTION & EQUALIZATION CHANNEL
+        # FIX: Updated 'gain_mono' parameter to 'gain' to prevent FFmpeg filter graph crash
         game_clean = (
             game_audio_node
-            .filter('firequalizer', gain_mono='if(lt(f,150),-24,0)')
+            .filter('firequalizer', gain='if(lt(f,150),-24,0)')
             .filter('aformat', sample_rates=48000, channel_layouts='stereo')
             .filter('apad', pad_dur=pad_duration)
             .filter('atrim', duration=total_length)

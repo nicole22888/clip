@@ -3,6 +3,7 @@ import uuid
 import json
 import logging
 import shutil
+import re
 from fastapi import APIRouter, UploadFile, File, Form, HTTPException, BackgroundTasks
 
 from backend.core.config import settings
@@ -18,12 +19,13 @@ RESULTS_DIR = os.path.join(QUEUE_DIR, "results")
 os.makedirs(RESULTS_DIR, exist_ok=True)
 
 def run_production_pipeline_bg(file_path: str, prompt: str, voice_text: str, voice_actor: str, result_file_path: str, job_workspace_dir: str):
+    """Orchestrates our modular multi-stage enterprise pipeline inside an isolated workspace context."""
     try:
+        # Stage 1: Dynamic Cloud AI Ingestion Analysis
         logger.info("📡 Stage 1: Querying frame context parameters via Gemini Cloud nodes...")
         res_inspector = analyze_video.run(file_path, prompt)
         blueprint_data = res_inspector.get("analysis", [])
         
-        # KEY NORMALIZATION: Standardize string keys to eliminate any unpacking crashes
         normalized_blueprint = []
         for item in blueprint_data:
             if isinstance(item, dict):
@@ -36,7 +38,9 @@ def run_production_pipeline_bg(file_path: str, prompt: str, voice_text: str, voi
             else:
                 continue
 
-        text_sentences = [s.strip() for s in voice_text.split(".") if s.strip()]
+        # CAPCUT PACING FIX: Use regex to split text on commas, periods, and newlines!
+        # This breaks your massive transcript down into distinct, short, punchy, timed phrases.
+        text_sentences = [s.strip() for s in re.split(r'[.,\n]', voice_text) if s.strip()]
         if not text_sentences: 
             text_sentences = ["Watch this action highlight sequence."]
 
@@ -46,10 +50,12 @@ def run_production_pipeline_bg(file_path: str, prompt: str, voice_text: str, voi
         asyncio.set_event_loop(loop)
         
         for idx, segment in enumerate(normalized_blueprint):
+            # Pull the exact corresponding short phrase element matching this clip block
             sentence = text_sentences[idx % len(text_sentences)] + "."
             voice_filename = f"voice_segment_{idx}_{uuid.uuid4().hex[:4]}.mp3"
             voice_absolute_path = os.path.join(job_workspace_dir, voice_filename)
             
+            # Generating independent audio bursts inserts native, realistic breathing space between cuts
             logger.info(f"🎙️ Stage 2: Compiling neural speech file track element #{idx+1} -> {voice_filename}")
             loop.run_until_complete(VoiceoverService.generate_speech_file(sentence, voice_actor, voice_absolute_path))
             voice_tracks_manifest.append(voice_absolute_path)
