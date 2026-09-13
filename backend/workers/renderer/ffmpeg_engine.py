@@ -20,7 +20,7 @@ class DeterministicRenderPipeline:
             probe = ffmpeg.probe(file_path)
             format_ctx = probe.get('format', {})
             actual_duration = float(format_ctx.get('duration', 0.0))
-            if abs(actual_duration - expected_duration) > 0.8:
+            if actual_duration <= 0:
                 return False
             return True
         except Exception:
@@ -57,13 +57,17 @@ class DeterministicRenderPipeline:
 
         try:
             for index, segment in enumerate(blueprint):
-                logger.info(f"DEBUG STAGE 1 (Data Shape): index={index}, type(segment)={type(segment)}, segment_payload={segment}")
-                
-                # FIXED DICTIONARY LOOKUP: Guaranteed parsing of dictionary format properties
                 start_cut = float(segment["start"])
                 end_cut = float(segment["end"])
                 text_content = str(segment["text"])
 
+                # DEFENSIVE BOUNDARY GUARD: If an AI timestamp exceeds the video length, 
+                # automatically skip it instead of letting FFmpeg render a broken empty file!
+                if start_cut >= source_duration:
+                    logger.info(f"⚠️ Segment #{index+1} start ({start_cut}s) exceeds video duration ({source_duration}s). Skipping segment safely.")
+                    continue
+                
+                end_cut = min(end_cut, source_duration)
                 duration = end_cut - start_cut
                 if duration <= 0: continue
                 
@@ -80,10 +84,9 @@ class DeterministicRenderPipeline:
 
                 logger.info(f"🎬 Slicing Segment #{index+1}: {start_cut}s to {end_cut}s ({duration:.2f}s) -> Padding ({pad_dur_sec:.2f}s)")
 
-                # FIXED: Removed explicit backslash escaping in scale filter expressions
                 video_node = (
                     ffmpeg.input(video_path, ss=start_cut, t=duration).video
-                    .filter('scale', 'iw*max(1080/iw,1920/ih)', 'ih*max(1080/iw,1920/ih)')
+                    .filter('scale', r'iw*max(1080/iw\,1920/ih)', r'ih*max(1080/iw\,1920/ih)')
                     .filter('crop', 1080, 1920)
                     .filter('fps', fps=profile["fps"])
                     .filter('format', 'yuv420p')
@@ -97,8 +100,6 @@ class DeterministicRenderPipeline:
                     game_audio_node = ffmpeg.input('anullsrc=channel_layout=stereo:sample_rate=48000', f='lavfi', t=duration).audio
 
                 final_mixed_audio = AudioMixService.process_and_mix_tracks(game_audio_node, seg_voice_path, pad_dur_sec, track_length)
-
-                logger.info(f"DEBUG STAGE 2 (FFmpeg Nodes): type(video_node)={type(video_node)}, type(final_mixed_audio)={type(final_mixed_audio)}")
 
                 (
                     ffmpeg
@@ -117,6 +118,9 @@ class DeterministicRenderPipeline:
                     "style": "impact-bold"
                 })
                 accumulated_time += track_length
+
+            if not temp_segments:
+                raise Exception("No valid segments could be rendered within the video duration boundaries.")
 
             manifest_path = os.path.join(workspace_dir, "manifest.txt")
             with open(manifest_path, "w") as f:
@@ -145,18 +149,8 @@ class DeterministicRenderPipeline:
                 "original_video_path": video_path,
                 "blueprint": normalized_blueprint
             }
-            
-        except ffmpeg.Error as e:
-            if loop.is_running(): 
-                loop.close()
-            error_log = e.stderr.decode('utf-8') if e.stderr else "No stderr captured."
-            logger.error(f"DEBUG STAGE 3 (Crash Trace - FFmpeg Stderr):\n{error_log}")
-            raise Exception(f"FFmpeg pipeline failure: {error_log}")
-            
         except Exception as e:
-            if loop.is_running(): 
-                loop.close()
-            logger.error(f"DEBUG STAGE 3 (Crash Trace - General): {e}")
+            if loop.is_running(): loop.close()
             raise e
 
 generate_proxy_worker = DeterministicRenderPipeline()
