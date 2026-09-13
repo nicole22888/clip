@@ -20,19 +20,22 @@ os.makedirs(RESULTS_DIR, exist_ok=True)
 def run_production_pipeline_bg(file_path: str, prompt: str, voice_text: str, voice_actor: str, result_file_path: str, job_workspace_dir: str):
     """Orchestrates our modular multi-stage enterprise pipeline inside an isolated workspace context."""
     try:
-        # DEFENSIVE PAYLOAD CLEANUP: If an old, stale browser cache string slips through, extract the clean prompt text safely
-        if " || VOICETEXT: " in prompt:
-            logger.info("⚠️ Legacy cache string pattern caught. Normalizing parameters dynamically...")
-            prompt_parts = prompt.split(" || VOICETEXT: ", 1)
-            prompt = prompt_parts[0]
-            if len(prompt_parts) > 1 and not voice_text or voice_text == "Watch this play!":
-                voice_text = prompt_parts[1]
-
         # Stage 1: Dynamic Cloud AI Ingestion Analysis
         logger.info("📡 Stage 1: Querying frame context parameters via Gemini Cloud nodes...")
         res_inspector = analyze_video.run(file_path, prompt)
         blueprint_data = res_inspector.get("analysis", [])
         
+        # KEY NORMALIZATION GUARD: Forcefully standardize multiple key variations 
+        # to guarantee the rendering loops never run into unpacking errors
+        normalized_blueprint = []
+        for item in blueprint_data:
+            extracted_text = item.get("text", item.get("suggested_text", "Highlight!"))
+            normalized_blueprint.append({
+                "start": float(item["start"]),
+                "end": float(item["end"]),
+                "text": str(extracted_text)
+            })
+
         # Split text lines safely matching segment rows lengths
         text_sentences = [s.strip() for s in voice_text.split(".") if s.strip()]
         if not text_sentences: 
@@ -45,7 +48,7 @@ def run_production_pipeline_bg(file_path: str, prompt: str, voice_text: str, voi
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
         
-        for idx, segment in enumerate(blueprint_data):
+        for idx, segment in enumerate(normalized_blueprint):
             sentence = text_sentences[idx % len(text_sentences)] + "."
             voice_filename = f"voice_segment_{idx}_{uuid.uuid4().hex[:4]}.mp3"
             voice_absolute_path = os.path.join(job_workspace_dir, voice_filename)
@@ -56,9 +59,10 @@ def run_production_pipeline_bg(file_path: str, prompt: str, voice_text: str, voi
             
         loop.close()
 
+        # Fixed parameter packet container mappings
         rendering_payload = {
             "video_path": file_path,
-            "blueprint": blueprint_data,
+            "blueprint": normalized_blueprint,
             "voice_tracks": voice_tracks_manifest,
             "workspace_dir": job_workspace_dir,
             "voice_text": voice_text,
@@ -73,6 +77,7 @@ def run_production_pipeline_bg(file_path: str, prompt: str, voice_text: str, voi
             json.dump({"state": "SUCCESS", "result": res_renderer}, f)
         logger.info("✨ Job pipeline completed all rendering metrics and passed QC safely!")
         
+        # Clean up temporary folders only
         if os.path.exists(job_workspace_dir):
             shutil.rmtree(job_workspace_dir)
 
@@ -89,26 +94,28 @@ async def process_video(
     voice_text: str = Form("Watch this play!"),
     voice_actor: str = Form("en-US-ChristopherNeural")
 ):
+    # Establish job tracker contexts
     job_id = str(uuid.uuid4())
     job_workspace_dir = os.path.join(settings.PROXY_DIR, job_id)
     os.makedirs(job_workspace_dir, exist_ok=True)
 
-    unique_filename = f"source_master_{uuid.uuid4().hex[:4]}.mp4"
-    file_path = os.path.join(job_workspace_dir, unique_filename)
+    # PERSISTENT STORAGE ALIGNMENT: Save incoming video bytes directly into your requested path
+    unique_filename = f"upload_{uuid.uuid4().hex[:6]}.mp4"
+    file_path = os.path.join(settings.UPLOAD_DIR, unique_filename)
     
     if video and video.filename:
         try:
+            logger.info(f"💾 Writing incoming video binary packets to requested persistent path: {file_path}")
             with open(file_path, "wb") as buffer:
                 while content := await video.read(1024 * 1024):
                     buffer.write(content)
         except Exception as e:
-            if os.path.exists(job_workspace_dir): shutil.rmtree(job_workspace_dir)
             raise HTTPException(status_code=500, detail=f"File write failure: {str(e)}")
     else:
+        logger.info("🎬 Empty file stream boundary context. Pulling local sample.mp4 data source...")
         sample_source = os.path.join(settings.BASE_DIR, "data/sample.mp4")
         if not os.path.exists(sample_source):
-            if os.path.exists(job_workspace_dir): shutil.rmtree(job_workspace_dir)
-            raise HTTPException(status_code=400, detail="Bypass limit active. Put a video at backend/data/sample.mp4 to run.")
+            raise HTTPException(status_code=400, detail="Please place a video file at backend/data/sample.mp4 to run.")
         shutil.copy(sample_source, file_path)
 
     result_file_path = os.path.join(RESULTS_DIR, f"{job_id}.json")

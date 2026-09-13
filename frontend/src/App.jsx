@@ -52,26 +52,17 @@ export default function App() {
             } catch (err) {
                 console.error("Status polling failed", err);
             }
-        }, 7000); // Sustainable 7-second polling rate
+        }, 7000); // 7-second polling loop interval
 
         return () => clearInterval(interval);
     }, [pipelineTaskId]);
 
     const handleUploadSubmit = async (e) => {
+        // CRITICAL: Stop the raw form engine from refreshing the page and killing file state logs
         e.preventDefault();
 
         if (!file) {
             triggerUiAlert("❌ Please select a video file first.", true);
-            return;
-        }
-
-        if (!file.type.startsWith('video/')) {
-            triggerUiAlert("❌ Please select a valid video file.", true);
-            return;
-        }
-
-        if (!voiceText.trim()) {
-            triggerUiAlert("❌ Please enter narrator script text.", true);
             return;
         }
 
@@ -81,10 +72,10 @@ export default function App() {
         setExportState('');
         setOriginalVideoPath('');
         setBlueprint([]);
-        triggerUiAlert("🚀 Ingesting video bytes and engineering narrator tracks...");
+        triggerUiAlert("🚀 Streaming payload and compiling narrator audio tracks...");
         
         try {
-            // Pass parameters cleanly to our upgraded service module fields
+            // Forward parameters cleanly to our synchronized API component instance
             const data = await videoService.uploadVideo(file, prompt, voiceText, voiceActor);
             setPipelineTaskId(data.task_id);
             setPipelineState(data.status === 'queued' ? 'QUEUED' : 'STARTED');
@@ -102,8 +93,7 @@ export default function App() {
 
         setExportState('RENDERING');
         setDownloadUrl('');
-        triggerUiAlert("🚀 Baking high-resolution vertical video copy...");
-
+        triggerUiAlert("🚀 Processing high-resolution visual layouts into master container...");
         try {
             await videoService.requestFinalExport(originalVideoPath, blueprint);
             setExportState('SUCCESS');
@@ -115,68 +105,45 @@ export default function App() {
         }
     };
 
-    const resetStudio = () => {
-        setFile(null);
-        setPipelineTaskId(null);
-        setPipelineState('');
-        setExportState('');
-        setDownloadUrl('');
-        setProxyUrl('');
-        setOriginalVideoPath('');
-        setBlueprint([]);
-        setUiAlert(null);
-    };
-
     return (
         <div className="min-h-screen bg-slate-950 text-slate-100 font-sans antialiased flex flex-col items-center py-8 px-4 relative selection:bg-amber-500 selection:text-slate-900">
             {uiAlert && (
                 <div className={`absolute top-4 z-50 w-[90%] max-w-[400px] text-white text-xs font-bold py-3.5 px-4 rounded-xl shadow-2xl flex items-center justify-between border border-white/10 ${uiAlert.isError ? 'bg-red-900' : 'bg-amber-600'}`}>
                     <span>{uiAlert.text}</span>
-                    <button onClick={() => setUiAlert(null)} className="opacity-70 font-bold ml-4 uppercase text-[10px]">
-                        Close
-                    </button>
+                    <button onClick={() => setUiAlert(null)} className="opacity-70 font-bold ml-4 uppercase text-[10px]">Close</button>
                 </div>
             )}
 
             <header className="w-full max-w-[420px] text-center mb-8">
-                <span className="text-[10px] font-black uppercase tracking-widest bg-amber-500/10 text-amber-400 px-2.5 py-1 rounded-full border border-amber-500/20">
-                    Whop Premium Edition
-                </span>
-                <h1 className="text-4xl font-black tracking-tighter text-white mt-3 uppercase">
-                    Clipper<span className="text-amber-400">.Studio</span>
-                </h1>
-                <p className="text-xs font-semibold text-slate-400 mt-1 uppercase tracking-wider">
-                    Automated Character Audio Video Studio
-                </p>
+                <span className="text-[10px] font-black uppercase tracking-widest bg-amber-500/10 text-amber-400 px-2.5 py-1 rounded-full border border-amber-500/20">Whop Premium Edition</span>
+                <h1 className="text-4xl font-black tracking-tighter text-white mt-3 uppercase">Clipper<span className="text-amber-400">.Studio</span></h1>
+                <p className="text-xs font-semibold text-slate-400 mt-1 uppercase tracking-wider">Automated Character Audio Video Studio</p>
             </header>
 
             <main className="w-full max-w-[420px] flex flex-col gap-6">
                 {!proxyUrl && (
                     <form onSubmit={handleUploadSubmit} className="bg-slate-900 border border-slate-800/80 p-5 rounded-2xl shadow-xl space-y-4">
                         <div>
-                            <label className="text-[10px] font-bold text-amber-400 uppercase tracking-widest block mb-2">
-                                1. Select Footage File
-                            </label>
-
+                            <label className="text-[10px] font-bold text-amber-400 uppercase tracking-widest block mb-2">1. Select Footage File</label>
                             <input 
                                 type="file" 
                                 accept="video/*"
-                                onChange={(e) => setFile(e.target.files?.[0] || null)}
+                                onChange={(e) => {
+                                    if (e.target.files && e.target.files.length > 0) {
+                                        setFile(e.target.files);
+                                    }
+                                }}
                                 className="w-full text-xs text-slate-400 file:mr-4 file:py-2 file:px-4 file:rounded-lg file:border-0 file:text-xs file:font-bold file:bg-amber-500/10 file:text-amber-400 hover:file:bg-amber-500/20 cursor-pointer border border-dashed border-slate-700 p-2 rounded-xl bg-slate-950/50"
                             />
-
                             {file && (
                                 <div className="mt-2 text-[10px] text-slate-500 truncate">
-                                    Selected: {file.name}
+                                    Selected: {file.name || file[0]?.name || 'Video selected'}
                                 </div>
                             )}
                         </div>
 
                         <div>
-                            <label className="text-[10px] font-bold text-amber-400 uppercase tracking-widest block mb-2">
-                                2. Character Voice Profile
-                            </label>
-
+                            <label className="text-[10px] font-bold text-amber-400 uppercase tracking-widest block mb-2">2. Character Voice Profile</label>
                             <select 
                                 value={voiceActor}
                                 onChange={(e) => setVoiceActor(e.target.value)}
@@ -190,10 +157,7 @@ export default function App() {
                         </div>
 
                         <div>
-                            <label className="text-[10px] font-bold text-amber-400 uppercase tracking-widest block mb-2">
-                                3. Narrator Script Text
-                            </label>
-
+                            <label className="text-[10px] font-bold text-amber-400 uppercase tracking-widest block mb-2">3. Narrator Script Text</label>
                             <textarea 
                                 value={voiceText}
                                 onChange={(e) => setVoiceText(e.target.value)}
@@ -204,10 +168,7 @@ export default function App() {
                         </div>
 
                         <div>
-                            <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest block mb-2">
-                                4. Directorial Cutting Instructions
-                            </label>
-
+                            <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest block mb-2">4. Directorial Cutting Instructions</label>
                             <textarea 
                                 value={prompt}
                                 onChange={(e) => setPrompt(e.target.value)}
@@ -221,9 +182,7 @@ export default function App() {
                             disabled={pipelineState === 'QUEUED' || pipelineState === 'STARTED'}
                             className="w-full bg-amber-500 hover:bg-amber-400 disabled:bg-slate-800 text-slate-950 text-xs font-black py-3.5 rounded-xl transition-all cursor-pointer select-none uppercase tracking-wider"
                         >
-                            {pipelineState === 'QUEUED' || pipelineState === 'STARTED'
-                                ? 'Generating Sound-reactive Compilations...'
-                                : 'Ignite CapCut Engine'}
+                            {pipelineState === 'QUEUED' || pipelineState === 'STARTED' ? 'Generating Sound-reactive Compilations...' : 'Ignite CapCut Engine'}
                         </button>
                     </form>
                 )}
@@ -267,9 +226,7 @@ export default function App() {
                         <MobileVideoPlayer proxyUrl={proxyUrl} blueprint={blueprint} />
                         
                         <div className="bg-slate-900 border border-slate-800 p-4 rounded-2xl shadow-xl">
-                            <h3 className="text-xs font-bold text-amber-400 uppercase tracking-widest mb-3">
-                                🎞️ Multi-Clip Assembly Timeline
-                            </h3>
+                            <h3 className="text-xs font-bold text-amber-400 uppercase tracking-widest mb-3">🎞️ Multi-Clip Assembly Timeline</h3>
 
                             {blueprint.length > 0 ? (
                                 <div className="flex flex-col gap-2">
@@ -337,9 +294,7 @@ export default function App() {
                                 disabled={exportState === 'RENDERING'}
                                 className="w-full bg-amber-500 hover:bg-amber-400 disabled:bg-slate-800 text-slate-950 text-xs font-black py-3.5 rounded-xl transition-all cursor-pointer select-none uppercase tracking-wider"
                             >
-                                {exportState === 'RENDERING'
-                                    ? 'Baking Master Video File...'
-                                    : '🚀 Bake Final High-Res Export (1080p)'}
+                                {exportState === 'RENDERING' ? 'Baking Master Video File...' : '🚀 Bake Final High-Res Export (1080p)'}
                             </button>
 
                             {downloadUrl && (
@@ -352,14 +307,6 @@ export default function App() {
                                 </a>
                             )}
                         </div>
-
-                        <button
-                            type="button"
-                            onClick={resetStudio}
-                            className="w-full text-[10px] font-black text-slate-500 hover:text-amber-400 uppercase tracking-widest py-3 transition-colors"
-                        >
-                            Process Another Video
-                        </button>
                     </div>
                 )}
             </main>
